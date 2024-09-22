@@ -1,0 +1,86 @@
+name: Go Build and Release
+
+on:
+  push:
+    branches: ["main"]
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: ./go.mod
+
+      - name: Run tests
+        run: go test -v ./...
+
+  build:
+    name: Build binaries for Windows, macOS, and Linux
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [amd64, arm64]
+        exclude:
+          - os: windows-latest
+            arch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: ./go.mod
+
+      - name: Determine OS Name
+        id: os-name
+        run: |
+          if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
+            echo "OS=linux" >> $GITHUB_ENV
+          elif [ "${{ matrix.os }}" == "macos-latest" ]; then
+            echo "OS=darwin" >> $GITHUB_ENV
+          else
+            echo "OS=windows" >> $GITHUB_ENV
+          fi
+        shell: bash
+
+      - name: Build binary on Linux and macOS
+        if: matrix.os != 'windows-latest'
+        env:
+          GOOS: ${{ env.OS }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          go build -o fabric-${OS}-${{ matrix.arch }}-${{ github.ref_name }} .
+
+      - name: Build binary on Windows
+        if: matrix.os == 'windows-latest'
+        env:
+          GOOS: windows
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          go build -o fabric-${OS}-${{ matrix.arch }}-${{ github.ref_name }} .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: fabric-${{ env.OS }}-${{ matrix.arch }}-${{ github.ref_name }}
+          path: fabric-${{ env.OS }}-${{ matrix.arch }}-${{ github.ref_name }}
+
+      - name: Upload release artifact
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          gh release upload ${{ github.ref_name }} fabric-${{ env.OS }}-${{ matrix.arch }}-${{ github.ref_name }}
